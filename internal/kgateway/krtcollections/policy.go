@@ -57,6 +57,15 @@ func (e *BackendPortNotAllowedError) Error() string {
 	return fmt.Sprintf("BackendRef to \"%s\" includes a port. Do not specify a port when referencing a Backend resource, as it defines its own port configuration", e.BackendName)
 }
 
+type IncorrectPortErr struct {
+	Port        int32
+	BackendName string
+}
+
+func (i *IncorrectPortErr) Error() string {
+	return fmt.Sprintf("Service %q found, but port %v not defined", i.BackendName, i.Port)
+}
+
 // MARK: BackendIndex
 
 type BackendIndex struct {
@@ -221,9 +230,7 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 	if up == nil {
 		var err error
 		if up, err = i.getBackendFromAlias(kctx, gk, n, port); err != nil {
-			// getBackendFromAlias returns ErrUnknownBackendKind when there are no aliases
-			// so return our own NotFoundError here
-			return nil, &NotFoundError{NotFoundObj: key}
+			return nil, err
 		}
 	}
 
@@ -278,7 +285,13 @@ func (i *BackendIndex) getBackendFromAlias(kctx krt.HandlerContext, gk schema.Gr
 		return nil, &NotFoundError{NotFoundObj: key.ObjectSource}
 	}
 
-	return out, nil
+	for _, res := range results {
+		if res.Port == port {
+			return out, nil
+		}
+	}
+
+	return nil, &IncorrectPortErr{Port: port, BackendName: n.Name}
 }
 
 func (i *BackendIndex) getBackendFromRef(kctx krt.HandlerContext, localns string, ref gwv1.BackendObjectReference) (*ir.BackendObjectIR, error) {
