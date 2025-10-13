@@ -63,7 +63,7 @@ type IncorrectPortErr struct {
 }
 
 func (i *IncorrectPortErr) Error() string {
-	return fmt.Sprintf("Service %q found, but port %v not defined", i.BackendName, i.Port)
+	return fmt.Sprintf("port %v of Service %q is not defined", i.Port, i.BackendName)
 }
 
 // MARK: BackendIndex
