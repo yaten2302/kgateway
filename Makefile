@@ -197,16 +197,6 @@ test-with-coverage: GINKGO_FLAGS += $(GINKGO_COVERAGE_FLAGS)
 test-with-coverage: test
 	go tool cover -html $(OUTPUT_DIR)/coverage.cov
 
-.PHONY: run-tests
-run-tests: GINKGO_FLAGS += -skip-package=e2e,kgateway,test/kubernetes/testutils/helper ## Run all non E2E tests, or only run the test package at {TEST_PKG} if it is specified
-run-tests: GINKGO_FLAGS += --label-filter="!end-to-end && !performance"
-run-tests: test
-
-.PHONY: run-e2e-tests
-run-e2e-tests: TEST_PKG = ./test/e2e/ ## Run all in-memory E2E tests
-run-e2e-tests: GINKGO_FLAGS += --label-filter="end-to-end && !performance"
-run-e2e-tests: test
-
 #----------------------------------------------------------------------------------
 # Env test
 #----------------------------------------------------------------------------------
@@ -661,7 +651,7 @@ $(TEST_ASSET_DIR)/conformance/conformance_test.go:
 	cat $(shell go list -json -m sigs.k8s.io/gateway-api | jq -r '.Dir')/conformance/conformance_test.go >> $@
 	go fmt $@
 
-CONFORMANCE_SUPPORTED_FEATURES ?= -supported-features=GatewayAddressEmpty,HTTPRouteParentRefPort,HTTPRouteRequestMirror,HTTPRouteBackendRequestHeaderModification,HTTPRouteNamedRouteRule,HTTPRouteDestinationPortMatching,HTTPRouteBackendProtocolH2C,HTTPRouteBackendProtocolWebSocket,HTTPRouteBackendTimeout,HTTPRouteHostRewrite,HTTPRouteMethodMatching,HTTPRoutePathRedirect,HTTPRoutePathRewrite,HTTPRoutePortRedirect,HTTPRouteQueryParamMatching,HTTPRouteRequestTimeout,HTTPRouteResponseHeaderModification,HTTPRouteSchemeRedirect
+CONFORMANCE_SUPPORTED_FEATURES ?= -supported-features=GatewayAddressEmpty,HTTPRouteParentRefPort,HTTPRouteRequestMirror,HTTPRouteBackendRequestHeaderModification,HTTPRouteNamedRouteRule,HTTPRouteDestinationPortMatching,HTTPRouteBackendProtocolH2C,HTTPRouteBackendProtocolWebSocket,HTTPRouteBackendTimeout,HTTPRouteHostRewrite,HTTPRouteMethodMatching,HTTPRoutePathRedirect,HTTPRoutePathRewrite,HTTPRoutePortRedirect,HTTPRouteQueryParamMatching,HTTPRouteRequestTimeout,HTTPRouteResponseHeaderModification,HTTPRouteSchemeRedirect,HTTPRouteCORS
 CONFORMANCE_UNSUPPORTED_FEATURES ?= -exempt-features=GatewayPort8080,GatewayStaticAddresses,GatewayHTTPListenerIsolation,GatewayInfrastructurePropagation,HTTPRouteRequestMultipleMirrors,HTTPRouteRequestPercentageMirror
 CONFORMANCE_SUPPORTED_PROFILES ?= -conformance-profiles=GATEWAY-HTTP,GATEWAY-TLS,GATEWAY-GRPC
 CONFORMANCE_GATEWAY_CLASS ?= kgateway
@@ -732,7 +722,7 @@ all-conformance: conformance gie-conformance agw-conformance ## Run all conforma
 #----------------------------------------------------------------------------------
 
 # Agent Gateway conformance test configuration
-AGW_CONFORMANCE_SUPPORTED_FEATURES ?= -supported-features=HTTPRouteBackendProtocolH2C,HTTPRouteBackendProtocolWebSocket,HTTPRouteHostRewrite,HTTPRouteMethodMatching,HTTPRoutePathRedirect,HTTPRoutePathRewrite,HTTPRoutePortRedirect,HTTPRouteQueryParamMatching,HTTPRouteResponseHeaderModification,HTTPRouteSchemeRedirect
+AGW_CONFORMANCE_SUPPORTED_FEATURES ?= -supported-features=HTTPRouteBackendProtocolH2C,HTTPRouteBackendProtocolWebSocket,HTTPRouteHostRewrite,HTTPRouteMethodMatching,HTTPRoutePathRedirect,HTTPRoutePathRewrite,HTTPRoutePortRedirect,HTTPRouteQueryParamMatching,HTTPRouteResponseHeaderModification,HTTPRouteSchemeRedirect,HTTPRouteCORS
 AGW_CONFORMANCE_UNSUPPORTED_FEATURES ?= $(CONFORMANCE_UNSUPPORTED_FEATURES)
 AGW_CONFORMANCE_SUPPORTED_PROFILES ?= -conformance-profiles=GATEWAY-HTTP
 AGW_CONFORMANCE_GATEWAY_CLASS ?= agentgateway
