@@ -57,13 +57,13 @@ func (e *BackendPortNotAllowedError) Error() string {
 	return fmt.Sprintf("BackendRef to \"%s\" includes a port. Do not specify a port when referencing a Backend resource, as it defines its own port configuration", e.BackendName)
 }
 
-type IncorrectPortErr struct {
+type BackendPortNotFoundError struct {
 	Port        int32
 	BackendName string
 }
 
-func (i *IncorrectPortErr) Error() string {
-	return fmt.Sprintf("port %v of Service %q is not defined", i.Port, i.BackendName)
+func (b *BackendPortNotFoundError) Error() string {
+	return fmt.Sprintf("port %v of Service %q is not defined", b.Port, b.BackendName)
 }
 
 // MARK: BackendIndex
@@ -291,7 +291,7 @@ func (i *BackendIndex) getBackendFromAlias(kctx krt.HandlerContext, gk schema.Gr
 		}
 	}
 
-	return nil, &IncorrectPortErr{Port: port, BackendName: n.Name}
+	return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
 }
 
 func (i *BackendIndex) getBackendFromRef(kctx krt.HandlerContext, localns string, ref gwv1.BackendObjectReference) (*ir.BackendObjectIR, error) {
