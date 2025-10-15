@@ -63,7 +63,7 @@ type BackendPortNotFoundError struct {
 }
 
 func (b *BackendPortNotFoundError) Error() string {
-	return fmt.Sprintf("port %v of Service %q is not defined", b.Port, b.BackendName)
+	return fmt.Sprintf("port %v of Backend %q is not defined", b.Port, b.BackendName)
 }
 
 // MARK: BackendIndex
