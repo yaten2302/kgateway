@@ -6,11 +6,8 @@ Clusters:
         resourceApiVersion: V3
     ignoreHealthOnHostRemoval: true
     metadata: {}
-    name: kube_default_example-svc_80
+    name: kube_default_example-svc_8080
     type: EDS
-  - connectTimeout: 5s
-    metadata: {}
-    name: test-backend-plugin_default_example-svc_80
 
 Listeners:
   - address:
@@ -107,8 +104,8 @@ Statuses:
       parents:
         - conditions:
             - lastTransitionTime: null
-              message: unknown backend kind
-              reason: InvalidKind
+              message: port 9999 of Service "example-svc" is not defined
+              reason: BackendPortNotFound
               status: "False"
               type: ResolvedRefs
             - lastTransitionTime: null

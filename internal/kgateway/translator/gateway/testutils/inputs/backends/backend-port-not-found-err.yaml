@@ -3,7 +3,7 @@ kind: Gateway
 metadata:
   name: example-gateway
 spec:
-  gatewayClassName: example-gateway-class
+  gatewayClassName: kgateway
   listeners:
   - name: http
     protocol: HTTP
@@ -16,15 +16,25 @@ metadata:
 spec:
   parentRefs:
   - name: example-gateway
+  hostnames:
+  - "test.example.com"
   rules:
-  - backendRefs:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
     - name: example-svc
-      port: 9999   # Service does not have this port
+      port: 9999 # This should trigger BackendPortNotFound error
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: example-svc
 spec:
+  selector:
+    app: test
   ports:
-    - port: 80
+    - protocol: TCP
+      port: 8080
+      targetPort: 80

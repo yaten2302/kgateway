@@ -55,6 +55,13 @@ func ProcessBackendError(err error, reporter reports.ParentRefReporter) {
 			Reason:  gwv1.RouteReasonBackendNotFound,
 			Message: err.Error(),
 		})
+	case errors.Is(err, &krtcollections.BackendPortNotFoundError{}):
+		reporter.SetCondition(reports.RouteCondition{
+			Type:    gwv1.RouteConditionResolvedRefs,
+			Status:  metav1.ConditionFalse,
+			Reason:  gwv1.RouteConditionReason("BackendPortNotFound"),
+			Message: err.Error(),
+		})
 	default:
 		// setting other errors to not found. not sure if there's a better option.
 		reporter.SetCondition(reports.RouteCondition{
