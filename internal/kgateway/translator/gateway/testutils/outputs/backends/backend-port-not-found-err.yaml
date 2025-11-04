@@ -6,7 +6,7 @@ Clusters:
         resourceApiVersion: V3
     ignoreHealthOnHostRemoval: true
     metadata: {}
-    name: kube_default_example-svc_8080
+    name: kube_default_example-service_8080
     type: EDS
   - connectTimeout: 5s
     metadata: {}
@@ -15,18 +15,18 @@ Clusters:
 Listeners:
   - address:
       socketAddress:
-        address: "::"
+        address: '::'
         ipv4Compat: true
         portValue: 80
     filterChains:
       - filters:
           - name: envoy.filters.network.http_connection_manager
             typedConfig:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
               httpFilters:
                 - name: envoy.filters.http.router
                   typedConfig:
-                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                    '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
               mergeSlashes: true
               normalizePath: true
               rds:
@@ -44,12 +44,12 @@ Routes:
     name: listener~80
     virtualHosts:
       - domains:
-          - "*"
-        name: listener~80~*
+          - test.example.com
+        name: listener~80~test_example_com
         routes:
           - match:
               prefix: /
-            name: listener~80~*-route-0-httproute-example-route-default-0-0-matcher-0
+            name: listener~80~test_example_com-route-0-httproute-example-route-default-0-0-matcher-0
             route:
               cluster: blackhole-cluster
               clusterNotFoundResponseCode: INTERNAL_SERVER_ERROR
@@ -107,7 +107,7 @@ Statuses:
       parents:
         - conditions:
             - lastTransitionTime: null
-              message: port 9999 of Service "example-svc" is not defined
+              message: backend port not found
               reason: BackendPortNotFound
               status: "False"
               type: ResolvedRefs
