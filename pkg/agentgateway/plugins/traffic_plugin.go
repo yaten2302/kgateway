@@ -62,9 +62,8 @@ func init() {
 // convertStatusCollection converts the specific TrafficPolicy status collection
 // to the generic controllers.Object status collection expected by the interface
 func convertStatusCollection(col krt.Collection[krt.ObjectWithStatus[*v1alpha1.TrafficPolicy, gwv1.PolicyStatus]]) krt.StatusCollection[controllers.Object, gwv1.PolicyStatus] {
-	// Use krt.NewCollection to transform the collection
-	return krt.NewCollection(col, func(ctx krt.HandlerContext, item krt.ObjectWithStatus[*v1alpha1.TrafficPolicy, gwv1.PolicyStatus]) *krt.ObjectWithStatus[controllers.Object, gwv1.PolicyStatus] {
-		return &krt.ObjectWithStatus[controllers.Object, gwv1.PolicyStatus]{
+	return krt.MapCollection(col, func(item krt.ObjectWithStatus[*v1alpha1.TrafficPolicy, gwv1.PolicyStatus]) krt.ObjectWithStatus[controllers.Object, gwv1.PolicyStatus] {
+		return krt.ObjectWithStatus[controllers.Object, gwv1.PolicyStatus]{
 			Obj:    controllers.Object(item.Obj),
 			Status: item.Status,
 		}
@@ -73,8 +72,9 @@ func convertStatusCollection(col krt.Collection[krt.ObjectWithStatus[*v1alpha1.T
 
 // NewTrafficPlugin creates a new TrafficPolicy plugin
 func NewTrafficPlugin(agw *AgwCollections) AgwPlugin {
-	col := krt.WrapClient(kclient.NewFiltered[*v1alpha1.TrafficPolicy](
+	col := krt.WrapClient(kclient.NewFilteredDelayed[*v1alpha1.TrafficPolicy](
 		agw.Client,
+		wellknown.TrafficPolicyGVR,
 		kclient.Filter{ObjectFilter: agw.Client.ObjectFilter()},
 	), agw.KrtOpts.ToOptions("TrafficPolicy")...)
 	policyStatusCol, policyCol := krt.NewStatusManyCollection(col, func(krtctx krt.HandlerContext, policyCR *v1alpha1.TrafficPolicy) (
@@ -1275,6 +1275,7 @@ func isCEL(expr v1alpha1.Template) bool {
 	_, iss := celEnv.Parse(string(expr))
 	return iss.Err() == nil
 }
+
 func attachmentName(target *api.PolicyTarget) string {
 	if target == nil {
 		return ""

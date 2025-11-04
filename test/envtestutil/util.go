@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
-	"github.com/solo-io/go-utils/contextutils"
-	"go.uber.org/zap"
 	istiokube "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/kubetypes"
@@ -32,10 +29,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	apisettings "github.com/kgateway-dev/kgateway/v2/api/settings"
-	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/controller"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/setup"
 	"github.com/kgateway-dev/kgateway/v2/pkg/pluginsdk"
 	"github.com/kgateway-dev/kgateway/v2/pkg/pluginsdk/collections"
+	"github.com/kgateway-dev/kgateway/v2/pkg/schemes"
 	"github.com/kgateway-dev/kgateway/v2/pkg/validator"
 )
 
@@ -43,7 +40,6 @@ type postStartFunc func(t *testing.T, ctx context.Context, client istiokube.CLIC
 
 func RunController(
 	t *testing.T,
-	logger *zap.Logger,
 	globalSettings *apisettings.Settings,
 	testEnv *envtest.Environment,
 	postStart postStartFunc,
@@ -54,6 +50,7 @@ func RunController(
 		kdbg *krt.DebugHandler,
 		client istiokube.CLIClient,
 		xdsPort int,
+		agwXdsPort int,
 	),
 ) {
 	if globalSettings == nil {
@@ -73,7 +70,6 @@ func RunController(
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	ctx = contextutils.WithExistingLogger(ctx, logger.Sugar())
 
 	cfg, err := testEnv.Start()
 	if err != nil {
@@ -115,13 +111,18 @@ func RunController(
 		t.Fatalf("can't listen %v", err)
 	}
 
+	l2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("can't listen %v", err)
+	}
+
 	s, err := setup.New(
 		setup.WithGlobalSettings(globalSettings),
 		setup.WithRestConfig(cfg),
 		setup.WithExtraPlugins(extraPlugins),
 		setup.WithKrtDebugger(krtDbg),
 		setup.WithXDSListener(l),
-		setup.WithAgwXDSListener(l),
+		setup.WithAgwXDSListener(l2),
 		setup.WithControllerManagerOptions(
 			func(ctx context.Context) *ctrl.Options {
 				return &ctrl.Options{
@@ -142,7 +143,7 @@ func RunController(
 			}),
 		setup.WithExtraManagerConfig([]func(ctx context.Context, mgr manager.Manager, objectFilter kubetypes.DynamicObjectFilter) error{
 			func(ctx context.Context, mgr manager.Manager, objectFilter kubetypes.DynamicObjectFilter) error {
-				return controller.AddToScheme(mgr.GetScheme())
+				return schemes.AddToScheme(mgr.GetScheme())
 			},
 		}...),
 		setup.WithValidator(validator),
@@ -152,18 +153,17 @@ func RunController(
 	}
 
 	// start kgateway
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := s.Start(ctx); err != nil {
-			log.Fatalf("error starting kgateway %v", err)
+			t.Errorf("error starting kgateway %v", err)
 		}
-	}()
+	})
 
 	xdsPort := l.Addr().(*net.TCPAddr).Port
-	t.Log("running tests, xds port:", xdsPort)
-	run(t, ctx, krtDbg, client, xdsPort)
-	t.Log("controller done. shutting down. xds port:", xdsPort)
+	agwXdsPort := l2.Addr().(*net.TCPAddr).Port
+	t.Logf("running tests, xds port: %v, agw xds port: %v", xdsPort, agwXdsPort)
+	run(t, ctx, krtDbg, client, xdsPort, agwXdsPort)
+	t.Logf("controller done. shutting down. xds port: %v, agw xds port: %v", xdsPort, agwXdsPort)
 }
 
 func GenerateKubeConfiguration(t *testing.T, restconfig *rest.Config) string {

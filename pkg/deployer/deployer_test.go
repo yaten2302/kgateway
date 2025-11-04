@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	envoybootstrapv3 "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v3"
 	envoycorev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -19,18 +18,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	inf "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	api "sigs.k8s.io/gateway-api/apis/v1"
 	apixv1a1 "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	gw2_v1alpha1 "github.com/kgateway-dev/kgateway/v2/api/v1alpha1"
-	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/controller"
 	deployerinternal "github.com/kgateway-dev/kgateway/v2/internal/kgateway/deployer"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugins/httplistenerpolicy"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/wellknown"
@@ -664,85 +660,6 @@ var _ = Describe("Deployer", func() {
 			// check the config map is using the xds address and port
 			cm := objs.findConfigMap(defaultNamespace, "agent-gateway")
 			Expect(cm).ToNot(BeNil())
-		})
-
-		It("clears RunAsUser for agentgateway when FloatingUserId=true", func() {
-			// enable floating user on kube config
-			gwp.Spec.Kube.FloatingUserId = ptr.To(true) //nolint:staticcheck
-			// also set a PodSecurityContext and ensure it flows to the pod
-			uid := int64(12345)
-			gid := int64(23456)
-			fsGroup := int64(34567)
-			gwp.Spec.Kube.PodTemplate = &gw2_v1alpha1.Pod{
-				SecurityContext: &corev1.PodSecurityContext{
-					RunAsUser:  &uid,
-					RunAsGroup: &gid,
-					FSGroup:    &fsGroup,
-				},
-			}
-			gw := &api.Gateway{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "agent-gateway",
-					Namespace: defaultNamespace,
-				},
-				Spec: api.GatewaySpec{
-					GatewayClassName: "agentgateway",
-					Infrastructure: &api.GatewayInfrastructure{
-						ParametersRef: &api.LocalParametersReference{
-							Group: gw2_v1alpha1.GroupName,
-							Kind:  api.Kind(wellknown.GatewayParametersGVK.Kind),
-							Name:  gwp.GetName(),
-						},
-					},
-					Listeners: []api.Listener{{
-						Name: "listener-1",
-						Port: 80,
-					}},
-				},
-			}
-			gwParams := deployerinternal.NewGatewayParameters(newFakeClientWithObjs(gwc, gwp), &deployer.Inputs{
-				CommonCollections: deployertest.NewCommonCols(GinkgoT(), gwc, gw),
-				Dev:               false,
-				ControlPlane: deployer.ControlPlaneInfo{
-					XdsHost:    "something.cluster.local",
-					XdsPort:    1234,
-					AgwXdsPort: 5678,
-				},
-				ImageInfo: &deployer.ImageInfo{
-					Registry: "foo",
-					Tag:      "bar",
-				},
-				GatewayClassName:         wellknown.DefaultGatewayClassName,
-				WaypointGatewayClassName: wellknown.DefaultWaypointClassName,
-				AgentgatewayClassName:    wellknown.DefaultAgwClassName,
-			})
-			d, err := deployerinternal.NewGatewayDeployer(
-				wellknown.DefaultGatewayControllerName,
-				wellknown.DefaultAgwControllerName,
-				wellknown.DefaultAgwClassName,
-				newFakeClientWithObjs(gwc, gwp),
-				gwParams,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			objsSlice, err := d.GetObjsToDeploy(context.Background(), gw)
-			Expect(err).NotTo(HaveOccurred())
-			objsSlice = d.SetNamespaceAndOwner(gw, objsSlice)
-
-			objs := clientObjects(objsSlice)
-			dep := objs.findDeployment(defaultNamespace, "agent-gateway")
-			Expect(dep).ToNot(BeNil())
-			expectedSecurityContext := dep.Spec.Template.Spec.Containers[0].SecurityContext
-			Expect(expectedSecurityContext).To(Not(BeNil()))
-			Expect(expectedSecurityContext.RunAsUser).To(BeNil())
-			// assert pod-level security context is rendered and RunAsUser cleared while other fields preserved
-			psc := dep.Spec.Template.Spec.SecurityContext
-			Expect(psc).ToNot(BeNil())
-			Expect(psc.RunAsUser).To(BeNil())
-			Expect(psc.RunAsGroup).ToNot(BeNil())
-			Expect(psc.FSGroup).ToNot(BeNil())
-			Expect(*psc.RunAsGroup).To(Equal(gid))
-			Expect(*psc.FSGroup).To(Equal(fsGroup))
 		})
 
 		It("omits our opinionated securityContexts for agw when OmitDefaultSecurityContext=true and pod and some container securityContexts are provided in GWP", func() {
@@ -1729,71 +1646,6 @@ var _ = Describe("Deployer", func() {
 				return gwp
 			}
 
-			gatewayParamsOverrideWithSds = func() *gw2_v1alpha1.GatewayParameters {
-				return &gw2_v1alpha1.GatewayParameters{
-					TypeMeta: metav1.TypeMeta{
-						Kind: wellknown.GatewayParametersGVK.Kind,
-						// The parsing expects GROUP/VERSION format in this field
-						APIVersion: gw2_v1alpha1.GroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      gwpOverrideName,
-						Namespace: defaultNamespace,
-						UID:       "1236",
-					},
-					Spec: gw2_v1alpha1.GatewayParametersSpec{
-						Kube: &gw2_v1alpha1.KubernetesProxyConfig{
-							SdsContainer: &gw2_v1alpha1.SdsContainer{
-								Image: &gw2_v1alpha1.Image{
-									Registry:   ptr.To("foo"),
-									Repository: ptr.To("bar"),
-									Tag:        ptr.To("baz"),
-								},
-							},
-							Istio: &gw2_v1alpha1.IstioIntegration{
-								IstioProxyContainer: &gw2_v1alpha1.IstioContainer{
-									Image: &gw2_v1alpha1.Image{
-										Registry:   ptr.To("scooby"),
-										Repository: ptr.To("dooby"),
-										Tag:        ptr.To("doo"),
-									},
-									IstioDiscoveryAddress: ptr.To("can't"),
-									IstioMetaMeshId:       ptr.To("be"),
-									IstioMetaClusterId:    ptr.To("overridden"),
-								},
-							},
-							AiExtension: &gw2_v1alpha1.AiExtension{
-								Enabled: ptr.To(true),
-								Image: &gw2_v1alpha1.Image{
-									Registry:   ptr.To("foo"),
-									Repository: ptr.To("bar"),
-									Tag:        ptr.To("baz"),
-								},
-								Ports: []corev1.ContainerPort{{
-									Name:          "foo",
-									ContainerPort: 80,
-								}},
-								Tracing: &gw2_v1alpha1.AiExtensionTrace{
-									EndPoint: "http://my-otel-collector.svc.cluster.local:4317",
-									Sampler: &gw2_v1alpha1.OTelTracesSampler{
-										SamplerType: ptr.To(gw2_v1alpha1.OTelTracesSamplerTraceidratio),
-										SamplerArg:  ptr.To("0.5"),
-									},
-									Timeout:  &metav1.Duration{Duration: 100 * time.Second},
-									Protocol: ptr.To(gw2_v1alpha1.OTLPTracesProtocolTypeGrpc),
-								},
-							},
-						},
-					},
-				}
-			}
-
-			gatewayParamsOverrideWithSdsAndFloatingUserId = func() *gw2_v1alpha1.GatewayParameters {
-				params := gatewayParamsOverrideWithSds()
-				params.Spec.Kube.FloatingUserId = ptr.To(true) //nolint:staticcheck
-				return params
-			}
-
 			gatewayParamsOverrideWithoutStats = func() *gw2_v1alpha1.GatewayParameters {
 				return &gw2_v1alpha1.GatewayParameters{
 					TypeMeta: metav1.TypeMeta{
@@ -1858,13 +1710,6 @@ var _ = Describe("Deployer", func() {
 						Value: "abcd",
 					},
 				}
-				return params
-			}
-
-			fullyDefinedGatewayParamsWithFloatingUserId = func() *gw2_v1alpha1.GatewayParameters {
-				params := fullyDefinedGatewayParameters(wellknown.DefaultGatewayParametersName, defaultNamespace)
-				params.Spec.Kube.FloatingUserId = ptr.To(true) //nolint:staticcheck
-				params.Spec.Kube.PodTemplate.SecurityContext.RunAsUser = nil
 				return params
 			}
 
@@ -2016,8 +1861,8 @@ var _ = Describe("Deployer", func() {
 		fullyDefinedValidationWithoutRunAsUser := func(objs clientObjects, inp *input) error {
 			expectedGwp := inp.defaultGwp.Spec.Kube
 			Expect(objs).NotTo(BeEmpty())
-			// Check we have Deployment, Envoy ConfigMap, ServiceAccount, Service, AI Stats ConfigMap
-			Expect(objs).To(HaveLen(5))
+			// Check we have Deployment, Envoy ConfigMap, ServiceAccount, Service
+			Expect(objs).To(HaveLen(4))
 			dep := objs.findDeployment(defaultNamespace, defaultDeploymentName)
 			Expect(dep).ToNot(BeNil())
 			Expect(dep.Spec.Replicas).ToNot(BeNil())
@@ -2079,15 +1924,6 @@ var _ = Describe("Deployer", func() {
 			Expect(istioContainer.Resources.Requests.Cpu()).To(Equal(expectedGwp.Istio.IstioProxyContainer.Resources.Requests.Cpu()))
 			// TODO: assert on istio args (e.g. log level, istio meta fields, etc)
 
-			// assert AI extension container
-			expectedAIExtension := fmt.Sprintf("%s/%s",
-				*expectedGwp.AiExtension.Image.Registry,   //nolint:staticcheck
-				*expectedGwp.AiExtension.Image.Repository, //nolint:staticcheck
-			)
-			aiExt := dep.Spec.Template.Spec.Containers[3]
-			Expect(aiExt.Image).To(ContainSubstring(expectedAIExtension))
-			Expect(aiExt.Ports).To(HaveLen(len(expectedGwp.AiExtension.Ports))) //nolint:staticcheck
-
 			// assert Service
 			svc := objs.findService(defaultNamespace, defaultServiceName)
 			Expect(svc).ToNot(BeNil())
@@ -2108,9 +1944,6 @@ var _ = Describe("Deployer", func() {
 
 			cm := objs.findConfigMap(defaultNamespace, defaultConfigMapName)
 			Expect(cm).ToNot(BeNil())
-
-			aiTracingConfig := objs.findConfigMap(defaultNamespace, defaultConfigMapName+"-ai-otel-config")
-			Expect(aiTracingConfig).ToNot(BeNil())
 
 			logLevelsMap := expectedGwp.EnvoyContainer.Bootstrap.ComponentLogLevels
 			levels := []types.GomegaMatcher{}
@@ -2198,118 +2031,6 @@ var _ = Describe("Deployer", func() {
 			}))
 
 			return nil
-		}
-
-		fullyDefinedValidationFloatingUserId := func(objs clientObjects, inp *input) error {
-			err := fullyDefinedValidationWithoutRunAsUser(objs, inp)
-			if err != nil {
-				return err
-			}
-
-			// Security contexts may be nil if unsetting runAsUser results in the a nil-equivalent object
-			// This is fine, as it leaves the runAsUser value undet as desired
-			dep := objs.findDeployment(defaultNamespace, defaultDeploymentName)
-			if dep.Spec.Template.Spec.SecurityContext != nil {
-				Expect(dep.Spec.Template.Spec.SecurityContext.RunAsUser).To(BeNil())
-			}
-
-			envoyContainer := dep.Spec.Template.Spec.Containers[0]
-			if envoyContainer.SecurityContext != nil {
-				Expect(envoyContainer.SecurityContext.RunAsUser).To(BeNil())
-			}
-
-			sdsContainer := dep.Spec.Template.Spec.Containers[1]
-			if sdsContainer.SecurityContext != nil {
-				Expect(sdsContainer.SecurityContext.RunAsUser).To(BeNil())
-			}
-
-			istioContainer := dep.Spec.Template.Spec.Containers[2]
-			if istioContainer.SecurityContext != nil {
-				Expect(istioContainer.SecurityContext.RunAsUser).To(BeNil())
-			}
-
-			return nil
-		}
-
-		generalAiAndSdsValidationFunc := func(objs clientObjects, inp *input, expectNullRunAsUser bool) error {
-			containers := objs.findDeployment(defaultNamespace, defaultDeploymentName).Spec.Template.Spec.Containers
-			Expect(containers).To(HaveLen(4))
-			var foundGw, foundSds, foundIstioProxy, foundAIExtension bool
-			var sdsContainer, istioProxyContainer, aiContainer, gwContainer corev1.Container
-			for _, container := range containers {
-				switch container.Name {
-				case deployer.SdsContainerName:
-					sdsContainer = container
-					foundSds = true
-				case deployer.IstioContainerName:
-					istioProxyContainer = container
-					foundIstioProxy = true
-				case deployer.KgatewayContainerName:
-					gwContainer = container
-					foundGw = true
-				case deployer.KgatewayAIContainerName:
-					aiContainer = container
-					foundAIExtension = true
-				default:
-					Fail("unknown container name " + container.Name)
-				}
-			}
-			Expect(foundGw).To(BeTrue())
-			Expect(foundSds).To(BeTrue())
-			Expect(foundIstioProxy).To(BeTrue())
-			Expect(foundAIExtension).To(BeTrue())
-
-			if expectNullRunAsUser {
-				if sdsContainer.SecurityContext != nil {
-					Expect(sdsContainer.SecurityContext.RunAsUser).To(BeNil())
-				}
-				if gwContainer.SecurityContext != nil {
-					Expect(gwContainer.SecurityContext.RunAsUser).To(BeNil())
-				}
-				if istioProxyContainer.SecurityContext != nil {
-					Expect(istioProxyContainer.SecurityContext.RunAsUser).To(BeNil())
-				}
-				if aiContainer.SecurityContext != nil {
-					Expect(aiContainer.SecurityContext.RunAsUser).To(BeNil())
-				}
-			}
-
-			By("validating the override values are set in the istio container")
-			Expect(istioProxyContainer.Env).To(ContainElement(corev1.EnvVar{
-				Name:      "CA_ADDR",
-				Value:     *inp.overrideGwp.Spec.Kube.Istio.IstioProxyContainer.IstioDiscoveryAddress,
-				ValueFrom: nil,
-			}))
-			Expect(istioProxyContainer.Env).To(ContainElement(corev1.EnvVar{
-				Name:      "ISTIO_META_MESH_ID",
-				Value:     *inp.overrideGwp.Spec.Kube.Istio.IstioProxyContainer.IstioMetaMeshId,
-				ValueFrom: nil,
-			}))
-			Expect(istioProxyContainer.Env).To(ContainElement(corev1.EnvVar{
-				Name:      "ISTIO_META_CLUSTER_ID",
-				Value:     *inp.overrideGwp.Spec.Kube.Istio.IstioProxyContainer.IstioMetaClusterId,
-				ValueFrom: nil,
-			}))
-
-			bootstrapCfg := objs.getEnvoyConfig(defaultNamespace, defaultConfigMapName)
-			clusters := bootstrapCfg.GetStaticResources().GetClusters()
-			Expect(clusters).ToNot(BeNil())
-			Expect(clusters).To(ContainElement(HaveField("Name", "gateway_proxy_sds")))
-
-			sdsImg := inp.overrideGwp.Spec.Kube.SdsContainer.Image
-			Expect(sdsContainer.Image).To(Equal(fmt.Sprintf("%s/%s:%s", *sdsImg.Registry, *sdsImg.Repository, *sdsImg.Tag)))
-			istioProxyImg := inp.overrideGwp.Spec.Kube.Istio.IstioProxyContainer.Image
-			Expect(istioProxyContainer.Image).To(Equal(fmt.Sprintf("%s/%s:%s", *istioProxyImg.Registry, *istioProxyImg.Repository, *istioProxyImg.Tag)))
-
-			return nil
-		}
-
-		aiAndSdsValidationFunc := func(objs clientObjects, inp *input) error {
-			return generalAiAndSdsValidationFunc(objs, inp, false) // false: don't expect null runAsUser
-		}
-
-		aiSdsAndFloatingUserIdValidationFunc := func(objs clientObjects, inp *input) error {
-			return generalAiAndSdsValidationFunc(objs, inp, true) // true: expect null runAsUser
 		}
 
 		DescribeTable("create and validate objs", func(inp *input, expected *expectedOutput) {
@@ -2436,29 +2157,6 @@ var _ = Describe("Deployer", func() {
 				defaultGwp: fullyDefinedGatewayParamsWithCustomEnv(),
 			}, &expectedOutput{
 				validationFunc: fullyDefinedValidationCustomEnv,
-			}),
-			Entry("Fully defined GatewayParameters with floating user id", &input{
-				dInputs:    istioEnabledDeployerInputs(),
-				gw:         defaultGateway(),
-				defaultGwp: fullyDefinedGatewayParamsWithFloatingUserId(),
-			}, &expectedOutput{
-				validationFunc: fullyDefinedValidationFloatingUserId,
-			}),
-			Entry("correct deployment with sds and AI extension enabled", &input{
-				dInputs:     istioEnabledDeployerInputs(),
-				gw:          defaultGatewayWithGatewayParams(gwpOverrideName),
-				defaultGwp:  defaultGatewayParams(),
-				overrideGwp: gatewayParamsOverrideWithSds(),
-			}, &expectedOutput{
-				validationFunc: aiAndSdsValidationFunc,
-			}),
-			Entry("correct deployment with sds, AI extension, and floatinguUserId enabled", &input{
-				dInputs:     istioEnabledDeployerInputs(),
-				gw:          defaultGatewayWithGatewayParams(gwpOverrideName),
-				defaultGwp:  defaultGatewayParams(),
-				overrideGwp: gatewayParamsOverrideWithSdsAndFloatingUserId(),
-			}, &expectedOutput{
-				validationFunc: aiSdsAndFloatingUserIdValidationFunc,
 			}),
 			Entry("no listeners on gateway", &input{
 				dInputs: defaultDeployerInputs(),
@@ -2757,113 +2455,6 @@ var _ = Describe("Deployer", func() {
 		)
 	})
 
-	Context("Inference Extension endpoint picker", func() {
-		const defaultNamespace = "default"
-
-		It("should deploy endpoint picker resources for an InferencePool when autoProvision is enabled", func() {
-			// Create a fake InferencePool resource.
-			pool := &inf.InferencePool{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       wellknown.InferencePoolKind,
-					APIVersion: fmt.Sprintf("%s/%s", inf.GroupVersion.Group, inf.GroupVersion.Version),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pool1",
-					Namespace: defaultNamespace,
-					UID:       "pool-uid",
-				},
-			}
-
-			// Initialize a new deployer with InferenceExtension inputs.
-			ie := &deployerinternal.InferenceExtension{}
-			chart, err := deployerinternal.LoadInferencePoolChart()
-			Expect(err).NotTo(HaveOccurred())
-			cli := newFakeClientWithObjs(pool)
-			d := deployer.NewDeployer(
-				wellknown.DefaultGatewayControllerName,
-				wellknown.DefaultAgwControllerName,
-				wellknown.DefaultAgwClassName,
-				cli,
-				chart,
-				ie,
-				deployerinternal.InferenceExtensionReleaseNameAndNamespace,
-			)
-
-			// Simulate reconciliation so that the pool gets its finalizer added.
-			err = controller.EnsureFinalizer(context.Background(), cli, pool)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Check that the pool itself has the finalizer set.
-			Expect(pool.GetFinalizers()).To(ContainElement(wellknown.InferencePoolFinalizer))
-
-			// Get the endpoint picker objects for the InferencePool.
-			objs, err := d.GetObjsToDeploy(context.Background(), pool)
-			Expect(err).NotTo(HaveOccurred())
-			objs = d.SetNamespaceAndOwner(pool, objs)
-
-			Expect(objs).NotTo(BeEmpty(), "expected non-empty objects for endpoint picker deployment")
-			Expect(objs).To(HaveLen(4))
-
-			// Find the child objects.
-			var sa *corev1.ServiceAccount
-			var crb *rbacv1.ClusterRoleBinding
-			var dep *appsv1.Deployment
-			var svc *corev1.Service
-			for _, obj := range objs {
-				switch t := obj.(type) {
-				case *corev1.ServiceAccount:
-					sa = t
-				case *rbacv1.ClusterRoleBinding:
-					crb = t
-				case *appsv1.Deployment:
-					dep = t
-				case *corev1.Service:
-					svc = t
-				}
-			}
-			Expect(sa).NotTo(BeNil(), "expected a ServiceAccount to be rendered")
-			Expect(crb).NotTo(BeNil(), "expected a ClusterRoleBinding to be rendered")
-			Expect(dep).NotTo(BeNil(), "expected a Deployment to be rendered")
-			Expect(svc).NotTo(BeNil(), "expected a Service to be rendered")
-
-			// Check that owner references are set on all rendered objects to the InferencePool.
-			for _, obj := range objs {
-				gvk := obj.GetObjectKind().GroupVersionKind()
-				if deployer.IsNamespaced(gvk) {
-					ownerRefs := obj.GetOwnerReferences()
-					Expect(ownerRefs).To(HaveLen(1))
-					ref := ownerRefs[0]
-					Expect(ref.Name).To(Equal(pool.Name))
-					Expect(ref.UID).To(Equal(pool.UID))
-					Expect(ref.Kind).To(Equal(pool.Kind))
-					Expect(ref.APIVersion).To(Equal(pool.APIVersion))
-					Expect(*ref.Controller).To(BeTrue())
-				}
-			}
-
-			// Validate that the rendered Deployment and Service have the expected names.
-			expectedName := fmt.Sprintf("%s-endpoint-picker", pool.Name)
-			Expect(sa.Name).To(Equal(expectedName))
-			Expect(crb.Name).To(Equal(expectedName))
-			Expect(dep.Name).To(Equal(expectedName))
-			Expect(svc.Name).To(Equal(expectedName))
-
-			// Check the container args for the expected poolName.
-			Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
-			pickerContainer := dep.Spec.Template.Spec.Containers[0]
-			Expect(pickerContainer.Args).To(Equal([]string{
-				"-poolName",
-				pool.Name,
-				"-v",
-				"4",
-				"-grpcPort",
-				"9002",
-				"-grpcHealthPort",
-				"9003",
-			}))
-		})
-	})
-
 	Context("with listener sets", func() {
 		var (
 			listenerSetPort int32 = 4567
@@ -3109,31 +2700,6 @@ func fullyDefinedGatewayParameters(name, namespace string) *gw2_v1alpha1.Gateway
 						IstioDiscoveryAddress: ptr.To("istioDiscoveryAddress"),
 						IstioMetaMeshId:       ptr.To("istioMetaMeshId"),
 						IstioMetaClusterId:    ptr.To("istioMetaClusterId"),
-					},
-				},
-				AiExtension: &gw2_v1alpha1.AiExtension{
-					Enabled: ptr.To(true),
-					Ports: []corev1.ContainerPort{
-						{
-							Name:          "foo",
-							ContainerPort: 80,
-						},
-					},
-					Image: &gw2_v1alpha1.Image{
-						Registry:   ptr.To("ai-extension-registry"),
-						Repository: ptr.To("ai-extension-repository"),
-						Tag:        ptr.To("ai-extension-tag"),
-						Digest:     ptr.To("ai-extension-digest"),
-						PullPolicy: ptr.To(corev1.PullAlways),
-					},
-					Tracing: &gw2_v1alpha1.AiExtensionTrace{
-						EndPoint: "http://my-otel-collector.svc.cluster.local:4317",
-						Sampler: &gw2_v1alpha1.OTelTracesSampler{
-							SamplerType: ptr.To(gw2_v1alpha1.OTelTracesSamplerTraceidratio),
-							SamplerArg:  ptr.To("0.5"),
-						},
-						Timeout:  &metav1.Duration{Duration: 100 * time.Second},
-						Protocol: ptr.To(gw2_v1alpha1.OTLPTracesProtocolTypeGrpc),
 					},
 				},
 			},

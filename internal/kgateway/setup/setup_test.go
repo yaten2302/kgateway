@@ -215,23 +215,12 @@ func TestWithAutoDns(t *testing.T) {
 	runScenario(t, "testdata/autodns", st)
 }
 
-func TestWithInferenceAPI(t *testing.T) {
-	st, err := envtestutil.BuildSettings()
-	if err != nil {
-		t.Fatalf("can't get settings %v", err)
-	}
-	st.EnableInferExt = true
-	st.InferExtAutoProvision = true
-
-	runScenario(t, "testdata/inference_api", st)
-}
-
 func TestPolicyUpdate(t *testing.T) {
 	st, err := envtestutil.BuildSettings()
 	if err != nil {
 		t.Fatalf("can't get settings %v", err)
 	}
-	setupEnvTestAndRun(t, st, func(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, client istiokube.CLIClient, xdsPort int) {
+	setupEnvTestAndRun(t, st, func(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, client istiokube.CLIClient, xdsPort, _ int) {
 		client.Kube().CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "gwtest"}}, metav1.CreateOptions{})
 
 		err = client.ApplyYAMLContents("gwtest", `kind: Gateway
@@ -325,7 +314,7 @@ spec:
 }
 
 func runScenario(t *testing.T, scenarioDir string, globalSettings *apisettings.Settings) {
-	setupEnvTestAndRun(t, globalSettings, func(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, client istiokube.CLIClient, xdsPort int) {
+	setupEnvTestAndRun(t, globalSettings, func(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, client istiokube.CLIClient, xdsPort, _ int) {
 		// list all yamls in test data
 		files, err := os.ReadDir(scenarioDir)
 		if err != nil {
@@ -359,10 +348,14 @@ func setupEnvTestAndRun(t *testing.T, globalSettings *apisettings.Settings, run 
 	kdbg *krt.DebugHandler,
 	client istiokube.CLIClient,
 	xdsPort int,
+	agwXdsPort int,
 ),
 ) {
 	proxy_syncer.UseDetailedUnmarshalling = true
 	writer.set(t)
+	t.Cleanup(func() {
+		writer.set(nil)
+	})
 
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths: []string{
@@ -379,7 +372,6 @@ func setupEnvTestAndRun(t *testing.T, globalSettings *apisettings.Settings, run 
 	}
 	envtestutil.RunController(
 		t,
-		logger,
 		globalSettings,
 		testEnv,
 		nil,
@@ -708,6 +700,18 @@ func (x xdsDumper) Dump(t *testing.T, ctx context.Context) (xdsDump, error) {
 		Routes:    routes,
 	}
 	return xdsDump, errs
+}
+
+type deltaXdsDumper struct {
+	conn *grpc.ClientConn
+	dr   *envoy_service_discovery_v3.DeltaDiscoveryRequest
+	ads  envoy_service_discovery_v3.AggregatedDiscoveryServiceClient
+}
+
+func (x deltaXdsDumper) Close() {
+	if x.conn != nil {
+		x.conn.Close()
+	}
 }
 
 type xdsDump struct {

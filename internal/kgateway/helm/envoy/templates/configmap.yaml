@@ -4,9 +4,12 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "kgateway.gateway.fullname" . }}
+  {{- with $gateway.gatewayAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   labels:
-    {{- include "kgateway.gateway.constLabels" . | nindent 4 }}
-    {{- include "kgateway.gateway.labels" . | nindent 4 }}
+    {{- include "kgateway.gateway.allLabels" . | nindent 4 }}
 data:
 {{- if and $gateway.xds.tls $gateway.xds.tls.enabled }}
   ca.crt: |
@@ -180,8 +183,11 @@ data:
           upstream_connection_options:
             tcp_keepalive:
               keepalive_time: 10
-          type: STRICT_DNS
-          respect_dns_ttl: true
+          cluster_type:
+            name: envoy.cluster.strict_dns
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+              respect_dns_ttl: true
         - name: admin_port_cluster
           connect_timeout: 5.000s
           type: STATIC

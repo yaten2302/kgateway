@@ -20,7 +20,7 @@ import (
 	gwv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gwxv1a1 "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
-	"github.com/avast/retry-go"
+	"github.com/avast/retry-go/v4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
@@ -399,16 +399,15 @@ func (s *StatusSyncer) syncGatewayStatus(ctx context.Context, logger *slog.Logge
 				return nil
 			}
 
-			// Prepare and apply the status patch
-			original := gw.DeepCopy()
+			// Apply the status update
 			gw.Status = *newStatus
-			if err := s.mgr.GetClient().Status().Patch(ctx, &gw, client.MergeFrom(original)); err != nil {
+			if err := s.mgr.GetClient().Status().Update(ctx, &gw); err != nil {
 				if !apierrors.IsConflict(err) {
-					logger.Error("error patching gateway status", "error", err, "gateway", gwnn.String())
+					logger.Error("error updating gateway status", "error", err, "gateway", gwnn.String())
 				}
 				return err
 			}
-			logger.Info("patched gateway status", "gateway", gwnn.String())
+			logger.Info("updated gateway status", "gateway", gwnn.String())
 
 			for _, cond := range gw.Status.Conditions {
 				if cond.Type != string(gwv1.GatewayConditionAccepted) &&

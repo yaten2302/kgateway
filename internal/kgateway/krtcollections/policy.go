@@ -3,12 +3,16 @@ package krtcollections
 import (
 	"errors"
 	"fmt"
-	"slices"
+
+	"istio.io/istio/pkg/slices"
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"strings"
 
 	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/util/smallset"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -328,20 +332,21 @@ func (i *BackendIndex) GetBackendFromRefWithoutRefGrantValidation(kctx krt.Handl
 // MARK: GatewayIndex
 
 type GatewayIndex struct {
-	policies *PolicyIndex
-	Gateways krt.Collection[ir.Gateway]
+	Gateways            krt.Collection[ir.Gateway]
+	GatewaysForDeployer krt.Collection[ir.GatewayForDeployer]
 }
 
 func NewGatewayIndex(
 	krtopts krtutil.KrtOptions,
-	controllerName string,
+	controllerNames smallset.Set[string],
+	envoyControllerName string,
 	policies *PolicyIndex,
 	gws krt.Collection[*gwv1.Gateway],
 	lss krt.Collection[*gwxv1a1.XListenerSet],
 	gwClasses krt.Collection[*gwv1.GatewayClass],
 	namespaces krt.Collection[NamespaceMetadata],
 ) *GatewayIndex {
-	h := &GatewayIndex{policies: policies}
+	h := &GatewayIndex{}
 
 	byParentRefIndex := krtpkg.UnnamedIndex(lss, func(in *gwxv1a1.XListenerSet) []targetRefIndexKey {
 		pRef := in.Spec.ParentRef
@@ -359,10 +364,48 @@ func NewGatewayIndex(
 		}}
 	})
 
-	h.Gateways = krt.NewCollection(gws, func(kctx krt.HandlerContext, gw *gwv1.Gateway) *ir.Gateway {
-		// only care about gateways use a class controlled by us
+	h.GatewaysForDeployer = krt.NewCollection(gws, func(kctx krt.HandlerContext, gw *gwv1.Gateway) *ir.GatewayForDeployer {
+		// only care about gateways use a class controlled by us (envoy or agentgatway)
 		gwClass := ptr.Flatten(krt.FetchOne(kctx, gwClasses, krt.FilterKey(string(gw.Spec.GatewayClassName))))
-		if gwClass == nil || controllerName != string(gwClass.Spec.ControllerName) {
+		if gwClass == nil || !controllerNames.Contains(string(gwClass.Spec.ControllerName)) {
+			return nil
+		}
+		ports := sets.New[int32]()
+		for _, l := range gw.Spec.Listeners {
+			ports.Insert(l.Port)
+		}
+
+		listenerSets := krt.Fetch(kctx, lss, krt.FilterIndex(byParentRefIndex, targetRefIndexKey{
+			Group:     wellknown.GatewayGroup,
+			Kind:      wellknown.GatewayKind,
+			Name:      gw.GetName(),
+			Namespace: gw.GetNamespace(),
+		}))
+
+		for _, ls := range listenerSets {
+			for _, l := range ls.Spec.Listeners {
+				ports.Insert(l.Port)
+			}
+		}
+		return &ir.GatewayForDeployer{
+			ObjectSource: ir.ObjectSource{
+				Group:     gwv1.GroupVersion.Group,
+				Kind:      wellknown.GatewayKind,
+				Namespace: gw.Namespace,
+				Name:      gw.Name,
+			},
+			ControllerName: string(gwClass.Spec.ControllerName),
+			Ports:          smallset.New(ports.UnsortedList()...),
+		}
+	})
+	if policies == nil {
+		return h
+	}
+
+	h.Gateways = krt.NewCollection(gws, func(kctx krt.HandlerContext, gw *gwv1.Gateway) *ir.Gateway {
+		// only care about gateways use a class controlled by envoy
+		gwClass := ptr.Flatten(krt.FetchOne(kctx, gwClasses, krt.FilterKey(string(gw.Spec.GatewayClassName))))
+		if gwClass == nil || string(gwClass.Spec.ControllerName) != envoyControllerName {
 			return nil
 		}
 
@@ -389,13 +432,13 @@ func NewGatewayIndex(
 		// TODO: http polic
 		//		panic("TODO: implement http policies not just listener")
 		gwIR.AttachedListenerPolicies = toAttachedPolicies(
-			h.policies.getTargetingPolicies(kctx, gwIR.ObjectSource, "", gw.GetLabels()))
+			policies.getTargetingPolicies(kctx, gwIR.ObjectSource, "", gw.GetLabels()))
 		gwIR.AttachedHttpPolicies = gwIR.AttachedListenerPolicies // see if i can find a better way to segment the listener level and http level policies
 		for _, l := range gw.Spec.Listeners {
 			gwIR.Listeners = append(gwIR.Listeners, ir.Listener{
 				Listener:         l,
 				Parent:           gw,
-				AttachedPolicies: toAttachedPolicies(h.policies.getTargetingPolicies(kctx, gwIR.ObjectSource, string(l.Name), gw.GetLabels())),
+				AttachedPolicies: toAttachedPolicies(policies.getTargetingPolicies(kctx, gwIR.ObjectSource, string(l.Name), gw.GetLabels())),
 				PolicyAncestorRef: gwv1.ParentReference{
 					Group:     k8sptr.To(gwv1.Group(wellknown.GatewayGVK.Group)),
 					Kind:      k8sptr.To(gwv1.Kind(wellknown.GatewayGVK.Kind)),
@@ -450,10 +493,10 @@ func NewGatewayIndex(
 				Obj:       ls,
 				Listeners: make([]ir.Listener, 0),
 			}
-			listenerSetPolicies := h.policies.getTargetingPolicies(kctx, lsIR.ObjectSource, "", ls.GetLabels())
+			listenerSetPolicies := policies.getTargetingPolicies(kctx, lsIR.ObjectSource, "", ls.GetLabels())
 
 			for _, l := range ls.Spec.Listeners {
-				listenerSpecificPolicies := h.policies.getTargetingPolicies(kctx, lsIR.ObjectSource, string(l.Name), ls.GetLabels())
+				listenerSpecificPolicies := policies.getTargetingPolicies(kctx, lsIR.ObjectSource, string(l.Name), ls.GetLabels())
 				// The Gateway Polices applies to all listeners but we need to apply them to listeners within the LS.
 				// Since there is no LS equivalent in Envoy, apply them on each listener in the LS.
 				// Ensure the sectioned policies are first
