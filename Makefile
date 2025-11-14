@@ -79,6 +79,16 @@ $(BUG_REPORT_DIR):
 # Base Alpine image used for all containers. Exported for use in goreleaser.yaml.
 export ALPINE_BASE_IMAGE ?= alpine:3.17.6
 
+GO_VERSION := $(shell cat go.mod | grep -E '^go' | awk '{print $$2}')
+GOTOOLCHAIN ?= go$(GO_VERSION)
+
+DEPSGOBIN ?= $(OUTPUT_DIR)
+GOLANGCI_LINT ?= go tool golangci-lint
+ANALYZE_ARGS ?= --fix --verbose
+CUSTOM_GOLANGCI_LINT_BIN ?= $(DEPSGOBIN)/golangci-lint-custom
+CUSTOM_GOLANGCI_LINT_RUN ?= $(CUSTOM_GOLANGCI_LINT_BIN) run --build-tags e2e
+CUSTOM_GOLANGCI_LINT_FMT ?= $(GOLANGCI_LINT) fmt
+
 #----------------------------------------------------------------------------------
 # Macros
 #----------------------------------------------------------------------------------
@@ -91,19 +101,17 @@ get_sources = $(shell find $(1) -name "*.go" | grep -v test | grep -v generated.
 # Repo setup
 #----------------------------------------------------------------------------------
 
-GOIMPORTS ?= go tool goimports
-
 .PHONY: init-git-hooks
 init-git-hooks:  ## Use the tracked version of Git hooks from this repo
 	git config core.hooksPath .githooks
 
 .PHONY: fmt
-fmt:  ## Format the code with goimports
-	$(GOIMPORTS) -local "github.com/kgateway-dev/kgateway/v2/"  -w $(shell ls -d */ | grep -v vendor)
+fmt:  ## Format the code with golangci-lint
+	$(CUSTOM_GOLANGCI_LINT_FMT) ./...
 
 .PHONY: fmt-changed
-fmt-changed:  ## Format the code with goimports
-	git diff --name-only | grep '.*.go$$' | xargs -- $(GOIMPORTS) -w
+fmt-changed: ## Format only the changed code with golangci-lint
+	git status -s -uno | awk '{print $$2}' | grep '.*.go$$' | xargs -r $(CUSTOM_GOLANGCI_LINT_FMT)
 
 # must be a separate target so that make waits for it to complete before moving on
 .PHONY: mod-download
@@ -113,6 +121,7 @@ mod-download:  ## Download the dependencies
 .PHONY: mod-tidy-nested
 mod-tidy-nested:  ## Tidy go mod files in nested modules
 	@echo "Tidying hack/utils/applier..." && cd hack/utils/applier && go mod tidy
+	@echo "Tidying hack/krtequals..." && cd hack/krtequals && go mod tidy
 
 .PHONY: mod-tidy
 mod-tidy: mod-download mod-tidy-nested ## Tidy the go mod file
@@ -122,14 +131,12 @@ mod-tidy: mod-download mod-tidy-nested ## Tidy the go mod file
 # Analyze
 #----------------------------------------------------------------------------
 
-GO_VERSION := $(shell cat go.mod | grep -E '^go' | awk '{print $$2}')
-GOTOOLCHAIN ?= go$(GO_VERSION)
-
-GOLANGCI_LINT ?= go tool golangci-lint
-ANALYZE_ARGS ?= --fix --verbose
 .PHONY: analyze
-analyze:  ## Run golangci-lint. Override options with ANALYZE_ARGS.
-	GOTOOLCHAIN=$(GOTOOLCHAIN) $(GOLANGCI_LINT) run $(ANALYZE_ARGS) --build-tags e2e ./...
+analyze: $(CUSTOM_GOLANGCI_LINT_BIN)  ## Run golangci-lint. Override options with ANALYZE_ARGS.
+	$(CUSTOM_GOLANGCI_LINT_RUN) $(ANALYZE_ARGS) ./...
+
+$(CUSTOM_GOLANGCI_LINT_BIN): go.mod go.sum .custom-gcl.yml
+	GOTOOLCHAIN=$(GOTOOLCHAIN) $(GOLANGCI_LINT) custom
 
 ACTION_LINT ?= go tool github.com/rhysd/actionlint/cmd/actionlint
 .PHONY: lint-actions
@@ -332,12 +339,14 @@ clean-stamps:
 $(STAMP_DIR)/go-generate-apis: $(API_SOURCE_FILES) | $(STAMP_DIR)
 	@echo "Running API code generation..."
 	GO111MODULE=on go generate ./hack/...
+	$(MAKE) fmt-changed
 	@touch $@
 
 # Mock generation with dependency tracking
 $(STAMP_DIR)/go-generate-mocks: $(MOCK_SOURCE_FILES) | $(STAMP_DIR)
 	@echo "Running mock generation..."
 	GO111MODULE=on go generate -run="mockgen" ./...
+	$(MAKE) fmt-changed
 	@touch $@
 
 # Combine both generation steps
@@ -361,9 +370,9 @@ $(STAMP_DIR)/generate-licenses: $(MOD_FILES) | $(STAMP_DIR)
 	@touch $@
 
 # Formatting - only runs if generation steps changed
-$(STAMP_DIR)/fmt: $(STAMP_DIR)/go-generate-all
+$(STAMP_DIR)/fmt: $(STAMP_DIR)/go-generate-all $(CUSTOM_GOLANGCI_LINT_BIN)
 	@echo "Formatting code..."
-	$(GOIMPORTS) -local "github.com/kgateway-dev/kgateway/v2/"  -w $(shell ls -d */ | grep -v vendor)
+	$(CUSTOM_GOLANGCI_LINT_FMT) ./...
 	@touch $@
 
 # Fast generation using stamp files (for local development)
