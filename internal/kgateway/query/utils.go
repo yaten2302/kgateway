@@ -12,6 +12,8 @@ import (
 )
 
 func ProcessBackendError(err error, reporter reports.ParentRefReporter) {
+	var portNotFoundErr *krtcollections.BackendPortNotFoundError
+
 	switch {
 	case errors.Is(err, krtcollections.ErrUnknownBackendKind):
 		reporter.SetCondition(reports.RouteCondition{
@@ -55,7 +57,7 @@ func ProcessBackendError(err error, reporter reports.ParentRefReporter) {
 			Reason:  gwv1.RouteReasonBackendNotFound,
 			Message: err.Error(),
 		})
-	case errors.Is(err, krtcollections.BackendPortNotFound):
+	case errors.As(err, &portNotFoundErr):
 		reporter.SetCondition(reports.RouteCondition{
 			Type:    gwv1.RouteConditionResolvedRefs,
 			Status:  metav1.ConditionFalse,

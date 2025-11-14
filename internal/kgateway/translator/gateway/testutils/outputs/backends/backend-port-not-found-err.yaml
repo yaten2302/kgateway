@@ -6,7 +6,7 @@ Clusters:
       resourceApiVersion: V3
   ignoreHealthOnHostRemoval: true
   metadata: {}
-  name: kube_default_example-service_8080
+  name: kube_default_example-svc_8080
   type: EDS
 - connectTimeout: 5s
   metadata: {}
