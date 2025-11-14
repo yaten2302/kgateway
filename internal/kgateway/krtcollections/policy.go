@@ -231,12 +231,21 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 
 	up := krt.FetchOne(kctx, col, krt.FilterKey(ir.BackendResourceName(key, port, "")))
 	if up == nil {
-		var err error
-		if up, err = i.getBackendFromAlias(kctx, gk, n, port); err != nil {
-			return nil, err
+		var found bool
+		for _, backend := range col.List() {
+			if backend.GetNamespace() == n.Namespace &&
+				backend.GetName() == n.Name &&
+				backend.GetGroupKind().Kind == gk.Kind {
+				found = true
+				break
+			}
 		}
-	}
+		if found {
+			return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
+		}
 
+		return i.getBackendFromAlias(kctx, gk, n, port)
+	}
 	return up, nil
 }
 
