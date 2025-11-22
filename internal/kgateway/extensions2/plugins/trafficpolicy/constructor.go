@@ -49,10 +49,7 @@ func (c *TrafficPolicyConstructor) ConstructIR(
 	outSpec := trafficPolicySpecIr{}
 
 	var errors []error
-	// Construct AI specific IR
-	if err := constructAI(krtctx, policyCR, c.commoncol.Secrets, &outSpec); err != nil {
-		errors = append(errors, err)
-	}
+
 	// Construct transformation specific IR
 	constructTransformation(policyCR, &outSpec)
 	// Construct rustformation specific IR
@@ -96,6 +93,11 @@ func (c *TrafficPolicyConstructor) ConstructIR(
 
 	// Construct rbac specific IR
 	if err := constructRBAC(policyCR, &outSpec); err != nil {
+		errors = append(errors, err)
+	}
+
+	// Construct jwt specific IR
+	if err := constructJwt(krtctx, policyCR, &outSpec, c.FetchGatewayExtension); err != nil {
 		errors = append(errors, err)
 	}
 

@@ -73,7 +73,6 @@ type TrafficPolicy struct {
 }
 
 type trafficPolicySpecIr struct {
-	ai              *aiPolicyIR
 	buffer          *bufferIR
 	extProc         *extprocIR
 	transformation  *transformationIR
@@ -88,6 +87,7 @@ type trafficPolicySpecIr struct {
 	retry           *retryIR
 	timeouts        *timeoutsIR
 	rbac            *rbacIR
+	jwt             *jwtIr
 }
 
 func (d *TrafficPolicy) CreationTime() time.Time {
@@ -103,9 +103,6 @@ func (d *TrafficPolicy) Equals(in any) bool {
 		return false
 	}
 
-	if !d.spec.ai.Equals(d2.spec.ai) {
-		return false
-	}
 	if !d.spec.transformation.Equals(d2.spec.transformation) {
 		return false
 	}
@@ -148,6 +145,9 @@ func (d *TrafficPolicy) Equals(in any) bool {
 	if !d.spec.rbac.Equals(d2.spec.rbac) {
 		return false
 	}
+	if !d.spec.jwt.Equals(d2.spec.jwt) {
+		return false
+	}
 	return true
 }
 
@@ -156,7 +156,6 @@ func (d *TrafficPolicy) Equals(in any) bool {
 // PGV validation is always performed regardless of route replacement mode.
 func (p *TrafficPolicy) Validate() error {
 	var validators []func() error
-	validators = append(validators, p.spec.ai.Validate)
 	validators = append(validators, p.spec.transformation.Validate)
 	validators = append(validators, p.spec.rustformation.Validate)
 	validators = append(validators, p.spec.localRateLimit.Validate)
@@ -169,6 +168,7 @@ func (p *TrafficPolicy) Validate() error {
 	validators = append(validators, p.spec.buffer.Validate)
 	validators = append(validators, p.spec.autoHostRewrite.Validate)
 	validators = append(validators, p.spec.rbac.Validate)
+	validators = append(validators, p.spec.jwt.Validate)
 	for _, validator := range validators {
 		if err := validator(); err != nil {
 			return err
@@ -186,6 +186,7 @@ type trafficPolicyPluginGwPass struct {
 	localRateLimitInChain    map[string]*localratelimitv3.LocalRateLimit
 	extAuthPerProvider       ProviderNeededMap
 	extProcPerProvider       ProviderNeededMap
+	jwtPerProvider           ProviderNeededMap
 	rateLimitPerProvider     ProviderNeededMap
 	rbacInChain              map[string]*envoyrbacv3.RBAC
 	corsInChain              map[string]*corsv3.Cors
@@ -303,35 +304,6 @@ func (p *trafficPolicyPluginGwPass) ApplyForRoute(pCtx *ir.RouteContext, outputR
 		return nil
 	}
 
-	if policy.spec.ai != nil {
-		var aiBackends []*v1alpha1.Backend
-		// check if the backends selected by targetRef are all AI backends before applying the policy
-		for _, backend := range pCtx.In.Backends {
-			if backend.Backend.BackendObject == nil {
-				// could be nil if not found or no ref grant
-				continue
-			}
-			b, ok := backend.Backend.BackendObject.Obj.(*v1alpha1.Backend)
-			if !ok {
-				// AI policy cannot apply to kubernetes services
-				// TODO(npolshak): Report this as a warning on status
-				logger.Warn("AI Policy cannot apply to kubernetes services", "backend_name", backend.Backend.BackendObject.GetName())
-				continue
-			}
-			if b.Spec.Type != v1alpha1.BackendTypeAI {
-				// AI policy cannot apply to non-AI backends
-				// TODO(npolshak): Report this as a warning on status
-				logger.Warn("AI Policy cannot apply to non-AI backend", "backend_name", backend.Backend.BackendObject.GetName(), "backend_type", string(b.Spec.Type))
-				continue
-			}
-			aiBackends = append(aiBackends, b)
-		}
-		if len(aiBackends) > 0 {
-			// Apply the AI policy to the all AI backends
-			p.processAITrafficPolicy(&pCtx.TypedFilterConfig, policy.spec.ai)
-		}
-	}
-
 	p.handlePerRoutePolicies(policy.spec, outputRoute)
 	p.handlePolicies(pCtx.FilterChainName, &pCtx.TypedFilterConfig, policy.spec)
 
@@ -348,10 +320,6 @@ func (p *trafficPolicyPluginGwPass) ApplyForRouteBackend(
 	}
 
 	p.handlePolicies(pCtx.FilterChainName, &pCtx.TypedFilterConfig, rtPolicy.spec)
-
-	if rtPolicy.spec.ai != nil && (rtPolicy.spec.ai.Transformation != nil || rtPolicy.spec.ai.Extproc != nil) {
-		p.processAITrafficPolicy(&pCtx.TypedFilterConfig, rtPolicy.spec.ai)
-	}
 
 	return nil
 }
@@ -452,6 +420,25 @@ func (p *trafficPolicyPluginGwPass) HttpFilters(fcc ir.FilterChainCommon) ([]fil
 		stagedFilters = append(stagedFilters, stagedExtAuthFilter)
 	}
 
+	// TODO: Add support for global jwt disable filter
+	for _, provider := range p.jwtPerProvider.Providers[fcc.FilterChainName] {
+		jwtFilter := provider.Extension.Jwt
+		if jwtFilter == nil {
+			continue
+		}
+
+		// add the specific jwt filter
+		jwtName := jwtFilterName(provider.Name)
+		stagedJwtFilter := filters.MustNewStagedFilter(
+			jwtName,
+			jwtFilter,
+			filters.DuringStage(filters.AuthNStage),
+		)
+
+		// stagedJwtFilter.Filter.Disabled = true
+		stagedFilters = append(stagedFilters, stagedJwtFilter)
+	}
+
 	if f := p.localRateLimitInChain[fcc.FilterChainName]; f != nil {
 		filter := filters.MustNewStagedFilter(localRateLimitFilterNamePrefix, f, filters.BeforeStage(filters.AcceptedStage))
 		filter.Filter.Disabled = true
@@ -535,6 +522,7 @@ func (p *trafficPolicyPluginGwPass) handlePolicies(
 	// to be set at the route level so we need to smuggle info upwards.
 	p.handleExtAuth(fcn, typedFilterConfig, spec.extAuth)
 	p.handleExtProc(fcn, typedFilterConfig, spec.extProc)
+	p.handleJwt(fcn, typedFilterConfig, spec.jwt)
 	p.handleGlobalRateLimit(fcn, typedFilterConfig, spec.globalRateLimit)
 	p.handleLocalRateLimit(fcn, typedFilterConfig, spec.localRateLimit)
 	p.handleCors(fcn, typedFilterConfig, spec.cors)

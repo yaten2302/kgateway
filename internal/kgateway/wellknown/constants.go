@@ -28,12 +28,9 @@ const (
 )
 
 const (
-	InfPoolTransformationFilterName   = "inferencepool.backend.transformation.kgateway.io"
-	AIBackendTransformationFilterName = "ai.backend.transformation.kgateway.io"
-	AIPolicyTransformationFilterName  = "ai.policy.transformation.kgateway.io"
-	AIExtProcFilterName               = "ai.extproc.kgateway.io"
-	SetMetadataFilterName             = "envoy.filters.http.set_filter_state"
-	ExtprocFilterName                 = "envoy.filters.http.ext_proc"
+	InfPoolTransformationFilterName = "inferencepool.backend.transformation.kgateway.io"
+	SetMetadataFilterName           = "envoy.filters.http.set_filter_state"
+	ExtprocFilterName               = "envoy.filters.http.ext_proc"
 )
 
 const (
@@ -48,6 +45,4 @@ const (
 	SessionToken = "sessionToken"
 	// SecretKey is the key name for in the secret data for the secret access key.
 	SecretKey = "secretKey"
-	// DefaultAWSRegion is the default AWS region.
-	DefaultAWSRegion = "us-east-1"
 )

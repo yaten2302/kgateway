@@ -12,6 +12,7 @@ import (
 	"istio.io/istio/pkg/kube/krt"
 	istiolog "istio.io/istio/pkg/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
@@ -19,10 +20,12 @@ import (
 
 	apisettings "github.com/kgateway-dev/kgateway/v2/api/settings"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/agentgatewaysyncer"
+	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/agentgatewaysyncer/backend/inferencepool"
+	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/agentjwksstore"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2"
-	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugins/inferenceextension/endpointpicker"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/plugins/waypoint"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/extensions2/registry"
+	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/jwks"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/krtcollections"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/krtcollections/metrics"
 	"github.com/kgateway-dev/kgateway/v2/internal/kgateway/proxy_syncer"
@@ -90,7 +93,7 @@ type StartConfig struct {
 	UniqueClients     krt.Collection[ir.UniqlyConnectedClient]
 
 	KrtOptions                   krtutil.KrtOptions
-	ExtraAgwPolicyStatusHandlers map[string]agwplugins.AgwPolicyStatusSyncHandler
+	ExtraAgwPolicyStatusHandlers map[schema.GroupVersionKind]agwplugins.AgwPolicyStatusSyncHandler
 
 	// GatewayControllerExtension is an extension that can be used to extend Gateway controller
 	GatewayControllerExtension sdk.GatewayControllerExtension
@@ -127,7 +130,7 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 			return nil, err
 		}
 		setupLog.Info("adding the endpoint-picker inference extension plugin")
-		gatedPlugins = append(gatedPlugins, endpointpicker.NewPlugin(ctx, cfg.CommonCollections))
+		gatedPlugins = append(gatedPlugins, inferencepool.NewPlugin(ctx, cfg.CommonCollections))
 	}
 	// Add the waypoint plugin if enabled
 	if cfg.SetupOpts.GlobalSettings.EnableWaypoint {
@@ -199,6 +202,12 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 	if cfg.SetupOpts.GlobalSettings.EnableAgentgateway {
 		agwMergedPlugins := agwPluginFactory(cfg)(ctx, cfg.AgwCollections)
 
+		// Compute the extra GVKs list to provide at initialization time
+		var gvks []schema.GroupVersionKind
+		for gvk := range cfg.ExtraAgwPolicyStatusHandlers {
+			gvks = append(gvks, gvk)
+		}
+
 		agwSyncer = agentgatewaysyncer.NewAgwSyncer(
 			ctx,
 			cfg.AgwControllerName,
@@ -206,6 +215,7 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 			cfg.AgwCollections,
 			agwMergedPlugins,
 			cfg.AdditionalGatewayClasses,
+			gvks,
 		)
 
 		agwSyncer.Init(cfg.KrtOptions.WithPrefix("agentgateway"))
@@ -221,9 +231,22 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 			cfg.Client,
 			agwSyncer.StatusCollections(),
 			agwSyncer.CacheSyncs(),
+			cfg.ExtraAgwPolicyStatusHandlers,
 		)
 		if err := cfg.Manager.Add(agwStatusSyncer); err != nil {
 			setupLog.Error(err, "unable to add agentgateway StatusSyncer runnable")
+			return nil, err
+		}
+
+		jwksStoreCtrl := agentjwksstore.NewJWKSStoreController(cfg.Manager, cfg.Client, cfg.AgwCollections)
+		if err := cfg.Manager.Add(jwksStoreCtrl); err != nil {
+			setupLog.Error(err, "unable to add agentgateway JwksStoreController runnable")
+			return nil, err
+		}
+		jwksStoreCtrl.Init(ctx)
+		jwksStore := jwks.BuildJwksStore(ctx, cfg.Client, cfg.CommonCollections, jwksStoreCtrl.JwksQueue(), namespaces.GetPodNamespace())
+		if err := cfg.Manager.Add(jwksStore); err != nil {
+			setupLog.Error(err, "unable to add agentgateway JwksStore runnable")
 			return nil, err
 		}
 	}
