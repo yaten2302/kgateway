@@ -59,7 +59,7 @@ func TestBasic(t *testing.T) {
 		})
 	})
 
-	t.Run("gateway with TLS listener with ALPN protocols", func(t *testing.T) {
+	t.Run("gateway with TLS listener with TLS options", func(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "gateway-only/tls-alpn.yaml",
 			outputFile: "gateway-only/tls-alpn.yaml",
@@ -1141,6 +1141,28 @@ func TestBasic(t *testing.T) {
 		})
 	})
 
+	t.Run("Backend Config Policy with Circuit Breakers minimal", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "backendconfigpolicy/circuitbreakers-minimal.yaml",
+			outputFile: "backendconfigpolicy/circuitbreakers-minimal.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "example-gateway",
+			},
+		})
+	})
+
+	t.Run("Backend Config Policy with Circuit Breakers full", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "backendconfigpolicy/circuitbreakers-full.yaml",
+			outputFile: "backendconfigpolicy/circuitbreakers-full.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "example-gateway",
+			},
+		})
+	})
+
 	t.Run("TrafficPolicy with explicit generation", func(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "traffic-policy/generation.yaml",
@@ -1494,6 +1516,17 @@ func TestBasic(t *testing.T) {
 		})
 	})
 
+	t.Run("JWT Policy with cross-namespace backends", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "jwt/cross-namespace.yaml",
+			outputFile: "jwt/cross-namespace.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "example-gateway",
+			},
+		})
+	})
+
 	t.Run("JWT Policy at httproute level", func(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "jwt/httproute.yaml",
@@ -1509,6 +1542,17 @@ func TestBasic(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "jwt/gateway-and-route.yaml",
 			outputFile: "jwt/gateway-and-route.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "example-gateway",
+			},
+		})
+	})
+
+	t.Run("JWT Policy at route level using remote JWKS", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "jwt/httproute-remote-jwks.yaml",
+			outputFile: "jwt/httproute-remote-jwks.yaml",
 			gwNN: types.NamespacedName{
 				Namespace: "default",
 				Name:      "example-gateway",
