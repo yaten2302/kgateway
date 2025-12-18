@@ -60,6 +60,15 @@ func (e *BackendPortNotAllowedError) Error() string {
 	return fmt.Sprintf("BackendRef to \"%s\" includes a port. Do not specify a port when referencing a Backend resource, as it defines its own port configuration", e.BackendName)
 }
 
+type BackendPortNotFoundError struct {
+	Port        int32
+	BackendName string
+}
+
+func (b *BackendPortNotFoundError) Error() string {
+	return fmt.Sprintf("port %v of Backend %q is not defined", b.Port, b.BackendName)
+}
+
 // ListenerCollection defines an interface that returns the listeners belonging to the implementing struct
 type ListenerCollection interface {
 	GetListeners() []gwv1.Listener
@@ -230,12 +239,20 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 
 	up := krt.FetchOne(kctx, col, krt.FilterKey(ir.BackendResourceName(key, port, "")))
 	if up == nil {
-		var err error
-		if up, err = i.getBackendFromAlias(kctx, gk, n, port); err != nil {
-			// getBackendFromAlias returns ErrUnknownBackendKind when there are no aliases
-			// so return our own NotFoundError here
-			return nil, &NotFoundError{NotFoundObj: key}
+		var found bool
+		for _, backend := range col.List() {
+			if backend.GetNamespace() == n.Namespace &&
+				backend.GetName() == n.Name &&
+				backend.GetGroupKind().Kind == gk.Kind {
+				found = true
+				break
+			}
 		}
+		if found {
+			return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
+		}
+
+		return i.getBackendFromAlias(kctx, gk, n, port)
 	}
 
 	return up, nil
@@ -285,11 +302,13 @@ func (i *BackendIndex) getBackendFromAlias(kctx krt.HandlerContext, gk schema.Gr
 		}
 	}
 
-	if out == nil {
-		return nil, &NotFoundError{NotFoundObj: key.ObjectSource}
+	for _, res := range results {
+		if res.Port == port {
+			return out, nil
+		}
 	}
 
-	return out, nil
+	return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
 }
 
 func (i *BackendIndex) getBackendFromRef(kctx krt.HandlerContext, localns string, ref gwv1.BackendObjectReference) (*ir.BackendObjectIR, error) {

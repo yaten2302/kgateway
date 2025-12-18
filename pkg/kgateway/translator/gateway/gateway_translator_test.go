@@ -237,6 +237,17 @@ func TestBasic(t *testing.T) {
 		})
 	})
 
+	t.Run("httproute with backend port not found error reports correctly", func(t *testing.T) {
+		test(t, translatorTestCase{
+			inputFile:  "backends/backend-port-not-found-err.yaml",
+			outputFile: "backends/backend-port-not-found-err.yaml",
+			gwNN: types.NamespacedName{
+				Namespace: "default",
+				Name:      "example-gateway",
+			},
+		})
+	})
+
 	t.Run("httproute with invalid backend reports correctly", func(t *testing.T) {
 		test(t, translatorTestCase{
 			inputFile:  "http-routing-invalid-backend",
