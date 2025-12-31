@@ -104,7 +104,7 @@ Statuses:
       parents:
         - conditions:
             - lastTransitionTime: null
-              message: port 9999 of Backend "example-svc" is not defined
+              message: port 9999 of Backend "example-svc" in namespace "default" is not defined
               reason: BackendPortNotFound
               status: "False"
               type: ResolvedRefs

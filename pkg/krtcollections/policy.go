@@ -63,10 +63,11 @@ func (e *BackendPortNotAllowedError) Error() string {
 type BackendPortNotFoundError struct {
 	Port        int32
 	BackendName string
+	Namespace   string
 }
 
 func (b *BackendPortNotFoundError) Error() string {
-	return fmt.Sprintf("port %v of Backend %q is not defined", b.Port, b.BackendName)
+	return fmt.Sprintf("port %v of Backend %q in namespace %q is not defined", b.Port, b.BackendName, b.Namespace)
 }
 
 // ListenerCollection defines an interface that returns the listeners belonging to the implementing struct
@@ -239,6 +240,7 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 
 	up := krt.FetchOne(kctx, col, krt.FilterKey(ir.BackendResourceName(key, port, "")))
 	if up == nil {
+		var err error
 		var found bool
 		for _, backend := range col.List() {
 			if backend.GetNamespace() == n.Namespace &&
@@ -249,10 +251,12 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 			}
 		}
 		if found {
-			return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
+			return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name, Namespace: n.Namespace}
 		}
 
-		return i.getBackendFromAlias(kctx, gk, n, port)
+		if up, err = i.getBackendFromAlias(kctx, gk, n, port); err != nil {
+			return nil, &NotFoundError{NotFoundObj: key}
+		}
 	}
 
 	return up, nil
@@ -288,6 +292,10 @@ func (i *BackendIndex) getBackendFromAlias(kctx krt.HandlerContext, gk schema.Gr
 		return nil, ErrUnknownBackendKind
 	}
 
+	if len(results) == 0 {
+		return nil, &NotFoundError{NotFoundObj: key.ObjectSource}
+	}
+
 	var out *ir.BackendObjectIR
 
 	// must return only one
@@ -308,7 +316,7 @@ func (i *BackendIndex) getBackendFromAlias(kctx krt.HandlerContext, gk schema.Gr
 		}
 	}
 
-	return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name}
+	return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name, Namespace: n.Namespace}
 }
 
 func (i *BackendIndex) getBackendFromRef(kctx krt.HandlerContext, localns string, ref gwv1.BackendObjectReference) (*ir.BackendObjectIR, error) {
