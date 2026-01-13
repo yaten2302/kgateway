@@ -120,10 +120,12 @@ fmt-changed: ## Format only the changed code with golangci-lint (skip deleted fi
 .PHONY: mod-download
 mod-download:  ## Download the dependencies
 	go mod download all
+	cd tools && go mod download all
 
 .PHONY: mod-tidy-nested
 mod-tidy-nested:  ## Tidy go mod files in nested modules
 	@echo "Tidying hack/utils/applier..." && cd hack/utils/applier && go mod tidy
+	@echo "Tidying tools..." && cd tools && go mod tidy
 
 .PHONY: mod-tidy
 mod-tidy: mod-download mod-tidy-nested ## Tidy the go mod file
@@ -182,6 +184,7 @@ test: ## Run all tests with ginkgo, or only run the test package at {TEST_PKG} i
 # will still have e2e tests run by Github Actions once they publish a pull
 # request.
 .PHONY: e2e-test
+e2e-test: extproc-server-docker kind-load-extproc-server
 e2e-test: go-test
 e2e-test: TEST_TAG = e2e
 e2e-test: GO_TEST_ARGS = $(E2E_GO_TEST_ARGS)
@@ -199,6 +202,13 @@ golden-deployer:  ## Refreshes golden files for ./test/deployer snapshot testing
 	@echo ""
 	@echo "This must pass after refreshing:"
 	go test ./test/deployer/...
+
+.PHONY: golden-helm
+golden-helm:  ## Refreshes golden files for ./test/helm snapshot testing
+	REFRESH_GOLDEN=true go test ./test/helm/... > /dev/null || true
+	@echo ""
+	@echo "This must pass after refreshing:"
+	go test ./test/helm/...
 
 #----------------------------------------------------------------------------------
 # Env test
@@ -273,7 +283,7 @@ view-test-coverage:
 	go tool cover -html $(OUTPUT_DIR)/cover.out
 
 #----------------------------------------------------------------------------------
-# Clean
+# MARK: Clean
 #----------------------------------------------------------------------------------
 
 # Important to clean before pushing new releases. Dockerfiles and binaries may not update properly
@@ -301,7 +311,7 @@ clean-bug-report:
 	rm -rf $(BUG_REPORT_DIR)
 
 #----------------------------------------------------------------------------------
-# Generated Code
+# MARK: Generated Code
 #----------------------------------------------------------------------------------
 # This section uses stamp files to optimize 'make generate-all' by tracking dependencies.
 #
@@ -577,6 +587,27 @@ dummy-idp-docker: $(DUMMY_IDP_OUTPUT_DIR)/.docker-stamp-$(DUMMY_IDP_VERSION)-$(G
 kind-load-dummy-idp:
 	$(KIND) load docker-image $(IMAGE_REGISTRY)/$(DUMMY_IDP_IMAGE_REPO):$(DUMMY_IDP_VERSION) --name $(CLUSTER_NAME)
 
+#----------------------------------------------------------------------------------
+# extproc-server (used in e2e tests)
+#----------------------------------------------------------------------------------
+
+EXTPROC_SERVER_DIR=test/e2e/features/agentgateway/extproc/example
+EXTPROC_SERVER_OUTPUT_DIR=$(OUTPUT_DIR)/$(EXTPROC_SERVER_DIR)
+export EXTPROC_SERVER_IMAGE_REPO ?= extproc-server
+EXTPROC_SERVER_VERSION=0.0.1
+
+$(EXTPROC_SERVER_OUTPUT_DIR)/.docker-stamp-$(EXTPROC_SERVER_VERSION)-$(GOARCH): $(shell find $(EXTPROC_SERVER_DIR) -name '*.go') $(EXTPROC_SERVER_DIR)/Dockerfile
+	$(BUILDX_BUILD) --load $(PLATFORM) $(EXTPROC_SERVER_DIR) -f $(EXTPROC_SERVER_DIR)/Dockerfile \
+		-t $(IMAGE_REGISTRY)/$(EXTPROC_SERVER_IMAGE_REPO):$(EXTPROC_SERVER_VERSION)
+	@mkdir -p $(dir $@)
+	@touch $@
+
+.PHONY: extproc-server-docker
+extproc-server-docker: $(EXTPROC_SERVER_OUTPUT_DIR)/.docker-stamp-$(EXTPROC_SERVER_VERSION)-$(GOARCH)
+
+.PHONY: kind-load-extproc-server
+kind-load-extproc-server:
+	$(KIND) load docker-image $(IMAGE_REGISTRY)/$(EXTPROC_SERVER_IMAGE_REPO):$(EXTPROC_SERVER_VERSION) --name $(CLUSTER_NAME)
 
 #----------------------------------------------------------------------------------
 # Helm
@@ -670,25 +701,24 @@ lint-kgateway-charts: ## Lint the kgateway and agentgateway charts
 # Release
 #----------------------------------------------------------------------------------
 
-GORELEASER ?= go tool github.com/goreleaser/goreleaser/v2
 GORELEASER_ARGS ?= --snapshot --clean
 GORELEASER_TIMEOUT ?= 60m
 GORELEASER_CURRENT_TAG ?= $(VERSION)
 
 .PHONY: release
 release: ## Create a release using goreleaser
-	GORELEASER_CURRENT_TAG=$(GORELEASER_CURRENT_TAG) $(GORELEASER) release $(GORELEASER_ARGS) --timeout $(GORELEASER_TIMEOUT)
-
+	GORELEASER_CURRENT_TAG=$(GORELEASER_CURRENT_TAG) go tool -modfile=tools/go.mod goreleaser release $(GORELEASER_ARGS) --timeout $(GORELEASER_TIMEOUT)
 .PHONY: release-notes
 release-notes: ## Generate release notes (PREVIOUS_TAG required, CURRENT_TAG optional)
 	./hack/generate-release-notes.sh -p $(PREVIOUS_TAG) -c $(or $(CURRENT_TAG),HEAD)
 
 #----------------------------------------------------------------------------------
-# Development
+# MARK: Development
 #----------------------------------------------------------------------------------
 
 KIND ?= go tool kind
 CLUSTER_NAME ?= kind
+# TODO: This should probably change depending on if kgateway or agw is installed
 INSTALL_NAMESPACE ?= kgateway-system
 
 # The version of the Node Docker image to use for booting the kind cluster: https://hub.docker.com/r/kindest/node/tags
@@ -726,6 +756,8 @@ deploy-agentgateway: package-agentgateway-charts deploy-agentgateway-crd-chart d
 .PHONY: setup-base
 setup-base: kind-create gw-api-crds gie-crds metallb ## Setup the base infrastructure (kind cluster, CRDs, and MetalLB)
 
+# Creates a functional kind cluster, builds and loads all images, and packages charts
+# Does NOT deploy anything to the cluster
 .PHONY: setup
 setup: setup-base kind-build-and-load package-kgateway-charts package-agentgateway-charts dummy-idp-docker kind-load-dummy-idp  ## Setup the complete infrastructure (base setup plus images and charts)
 
@@ -815,6 +847,7 @@ run-load-tests-production: ## Run production load tests (5000 routes)
 	go test -tags=e2e -v ./test/e2e/tests -run "^TestKgateway$$/^AttachedRoutes$$/^TestAttachedRoutesProduction$$"
 
 #----------------------------------------------------------------------------------
+# MARK: Conformance
 # Targets for running Kubernetes Gateway API conformance tests
 #----------------------------------------------------------------------------------
 

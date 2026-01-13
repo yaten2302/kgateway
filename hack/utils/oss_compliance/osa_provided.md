@@ -3,8 +3,8 @@ Name|Version|License
 [cel.dev/expr](https://cel.dev/expr)|v0.25.1|Apache License 2.0
 [semver/v3](https://github.com/Masterminds/semver)|v3.4.0|MIT License
 [PuerkitoBio/goquery](https://github.com/PuerkitoBio/goquery)|v1.10.1|BSD 3-clause "New" or "Revised" License
-[agentgateway/agentgateway](https://github.com/agentgateway/agentgateway)|v0.11.0|Apache License 2.0
-[anthropics/anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go)|v1.13.0|MIT License
+[agentgateway/agentgateway](https://github.com/agentgateway/agentgateway)|v0.11.1|Apache License 2.0
+[anthropics/anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go)|v1.19.0|MIT License
 [retry-go/v4](https://github.com/avast/retry-go)|v4.7.0|MIT License
 [xds/go](https://github.com/cncf/xds)|v0.0.0-20251110193048-8bfbf64dc13e|Apache License 2.0
 [envoyproxy/go-control-plane](https://github.com/envoyproxy/go-control-plane)|v0.14.0|Apache License 2.0
@@ -25,7 +25,7 @@ Name|Version|License
 [kagent-dev/mockllm](https://github.com/kagent-dev/mockllm)|v0.0.2-0.20251008144831-c6105837f767|Apache License 2.0
 [kelseyhightower/envconfig](https://github.com/kelseyhightower/envconfig)|v1.4.0|MIT License
 [mitchellh/hashstructure](https://github.com/mitchellh/hashstructure)|v1.1.0|MIT License
-[ginkgo/v2](https://github.com/onsi/ginkgo)|v2.26.0|MIT License
+[ginkgo/v2](https://github.com/onsi/ginkgo)|v2.27.2|MIT License
 [onsi/gomega](https://github.com/onsi/gomega)|v1.38.2|MIT License
 [openai/openai-go](https://github.com/openai/openai-go)|v1.12.0|Apache License 2.0
 [prometheus/client_golang](https://github.com/prometheus/client_golang)|v1.23.2|Apache License 2.0
@@ -55,7 +55,7 @@ Name|Version|License
 [klog/v2](https://k8s.io/klog/v2)|v2.130.1|Apache License 2.0
 [k8s.io/utils](https://k8s.io/utils)|v0.0.0-20251002143259-bc988d571ff4|Apache License 2.0
 [sigs.k8s.io/controller-runtime](https://sigs.k8s.io/controller-runtime)|v0.22.3|Apache License 2.0
-[sigs.k8s.io/gateway-api](https://sigs.k8s.io/gateway-api)|v1.4.0|Apache License 2.0
+[sigs.k8s.io/gateway-api](https://sigs.k8s.io/gateway-api)|v1.4.1|Apache License 2.0
 [sigs.k8s.io/gateway-api-inference-extension](https://sigs.k8s.io/gateway-api-inference-extension)|v1.1.0|Apache License 2.0
 [sigs.k8s.io/yaml](https://sigs.k8s.io/yaml)|v1.6.0|MIT License
 [cmd/goimports](https://golang.org/x/tools/cmd/goimports)|latest|MIT License
