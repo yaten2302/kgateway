@@ -85,7 +85,8 @@ type BackendIndex struct {
 	// availableBackends are the backends as supplied by backend-contributed plugins.
 	// Any policies here are attached directly at Backend generation and not attached via
 	// policy index. Use availableBackendsWithPolicy when you need policy.
-	availableBackends map[schema.GroupKind]krt.Collection[ir.BackendObjectIR]
+	availableBackends     map[schema.GroupKind]krt.Collection[ir.BackendObjectIR]
+	availableBackendNames map[schema.GroupKind]krt.Collection[krt.Named]
 	// aliasIndex indexes the availableBackends for a given GK by the BackendObjectIR's Alias
 	aliasIndex map[schema.GroupKind]krt.Index[backendKey, ir.BackendObjectIR]
 
@@ -114,12 +115,13 @@ func NewBackendIndex(
 	refgrants *RefGrantIndex,
 ) *BackendIndex {
 	return &BackendIndex{
-		policies:          policies,
-		refgrants:         refgrants,
-		availableBackends: map[schema.GroupKind]krt.Collection[ir.BackendObjectIR]{},
-		aliasIndex:        map[schema.GroupKind]krt.Index[backendKey, ir.BackendObjectIR]{},
-		gkAliases:         map[schema.GroupKind][]schema.GroupKind{},
-		krtopts:           krtopts,
+		policies:              policies,
+		refgrants:             refgrants,
+		availableBackends:     map[schema.GroupKind]krt.Collection[ir.BackendObjectIR]{},
+		aliasIndex:            map[schema.GroupKind]krt.Index[backendKey, ir.BackendObjectIR]{},
+		gkAliases:             map[schema.GroupKind][]schema.GroupKind{},
+		availableBackendNames: map[schema.GroupKind]krt.Collection[krt.Named]{},
+		krtopts:               krtopts,
 	}
 }
 
@@ -141,6 +143,11 @@ func (i *BackendIndex) HasSynced() bool {
 		}
 	}
 	for _, col := range i.backendsRequiringPolicyStatus {
+		if !col.HasSynced() {
+			return false
+		}
+	}
+	for _, col := range i.availableBackendNames {
 		if !col.HasSynced() {
 			return false
 		}
@@ -205,6 +212,12 @@ func (i *BackendIndex) AddBackends(gk schema.GroupKind, col krt.Collection[ir.Ba
 		return aliasKeys
 	})
 	i.availableBackends[gk] = col
+	i.availableBackendNames[gk] = krt.NewCollection(col, func(kctx krt.HandlerContext, backendObj ir.BackendObjectIR) *krt.Named {
+		return &krt.Named{
+			Name:      backendObj.ObjectSource.Name,
+			Namespace: backendObj.ObjectSource.Namespace,
+		}
+	}, i.krtopts.ToOptions("")...)
 	i.aliasIndex[gk] = idx
 	i.availableBackendsWithPolicy = append(i.availableBackendsWithPolicy, backendsWithPoliciesCol)
 	i.backendsRequiringPolicyStatus = append(i.backendsRequiringPolicyStatus, backendsRequiringPolicyStatus)
@@ -242,17 +255,16 @@ func (i *BackendIndex) getBackend(kctx krt.HandlerContext, gk schema.GroupKind, 
 	up := krt.FetchOne(kctx, col, krt.FilterKey(ir.BackendResourceName(key, port, "")))
 	if up == nil {
 		var err error
-		var found bool
-		for _, backend := range col.List() {
-			if backend.GetNamespace() == n.Namespace &&
-				backend.GetName() == n.Name &&
-				backend.GetGroupKind().Kind == gk.Kind {
-				found = true
-				break
+		nn := krt.Named{Name: n.Name, Namespace: n.Namespace}
+		nameCol := i.availableBackendNames[gk]
+		maybeName := krt.FetchOne(kctx, nameCol, krt.FilterKey(nn.ResourceName()))
+
+		if maybeName != nil {
+			return nil, &BackendPortNotFoundError{
+				Port:        port,
+				BackendName: n.Name,
+				Namespace:   n.Namespace,
 			}
-		}
-		if found {
-			return nil, &BackendPortNotFoundError{Port: port, BackendName: n.Name, Namespace: n.Namespace}
 		}
 
 		if up, err = i.getBackendFromAlias(kctx, gk, n, port); err != nil {
